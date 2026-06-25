@@ -1,0 +1,12 @@
+push_to_github.py
+.env
+episodes_db.json
+users_db.json
+config_db.json
+__pycache__/
+*.log
+venv/
+test.log
+stdout.log
+stderr.log
+kino_bot_uz.zip
