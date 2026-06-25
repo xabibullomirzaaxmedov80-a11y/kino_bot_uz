@@ -1,4 +1,4 @@
 {
-  "summary":  "Update bot script with a dummy web server to comply with Render's free Web Service hosting",
-  "updatedAt":  "2026-06-25T11:44:35.679434800Z"
+  "summary":  "Database persistence upgrade using MongoDB Atlas with local JSON fallback for Kino Bot",
+  "updatedAt":  "2026-06-25T12:02:33.852178800Z"
 }

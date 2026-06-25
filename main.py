@@ -17,7 +17,28 @@ DB_FILE = "episodes_db.json"
 USERS_FILE = "users_db.json"
 CONFIG_FILE = "config_db.json"
 
-# Load database helper functions
+# Try importing pymongo for cloud database persistence
+try:
+    from pymongo import MongoClient
+    HAS_MONGO = True
+except ImportError:
+    HAS_MONGO = False
+
+# MongoDB Connection Setup
+MONGO_URL = os.getenv("MONGO_URL")
+mongo_client = None
+mongo_db = None
+
+if HAS_MONGO and MONGO_URL:
+    try:
+        # Connect to MongoDB Atlas (or local MongoDB)
+        mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+        mongo_db = mongo_client["kino_bot"]
+        print("Connected to MongoDB successfully!")
+    except Exception as e:
+        print(f"MongoDB Connection Error: {e}")
+
+# Helper JSON loading/saving
 def load_json(filename):
     if os.path.exists(filename):
         try:
@@ -34,10 +55,85 @@ def save_json(filename, data):
     except Exception as e:
         print(f"Error saving {filename}: {e}")
 
-# Global DB state
-db = load_json(DB_FILE)
-users_db = load_json(USERS_FILE)
-config_db = load_json(CONFIG_FILE)
+# Load Database States
+def load_db():
+    if mongo_db is not None:
+        try:
+            col = mongo_db["episodes"]
+            result = {}
+            for doc in col.find():
+                result[doc["_id"]] = doc["file_id"]
+            return result
+        except Exception as e:
+            print(f"Error loading episodes from MongoDB: {e}")
+    return load_json(DB_FILE)
+
+def save_episode(episode_num, file_id):
+    db[str(episode_num)] = file_id
+    if mongo_db is not None:
+        try:
+            col = mongo_db["episodes"]
+            col.update_one({"_id": str(episode_num)}, {"$set": {"file_id": file_id}}, upsert=True)
+            return
+        except Exception as e:
+            print(f"Error saving episode to MongoDB: {e}")
+    save_json(DB_FILE, db)
+
+def load_users():
+    if mongo_db is not None:
+        try:
+            col = mongo_db["users"]
+            result = {}
+            for doc in col.find():
+                result[doc["_id"]] = doc["data"]
+            return result
+        except Exception as e:
+            print(f"Error loading users from MongoDB: {e}")
+    return load_json(USERS_FILE)
+
+def register_user(chat_id, username, first_name):
+    chat_id_str = str(chat_id)
+    if chat_id_str not in users_db:
+        data = {
+            "username": username or "",
+            "first_name": first_name or "",
+            "joined_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        users_db[chat_id_str] = data
+        if mongo_db is not None:
+            try:
+                col = mongo_db["users"]
+                col.update_one({"_id": chat_id_str}, {"$set": {"data": data}}, upsert=True)
+                return
+            except Exception as e:
+                print(f"Error registering user in MongoDB: {e}")
+        save_json(USERS_FILE, users_db)
+
+def load_config():
+    if mongo_db is not None:
+        try:
+            col = mongo_db["config"]
+            doc = col.find_one({"_id": "settings"})
+            if doc:
+                return doc["data"]
+        except Exception as e:
+            print(f"Error loading config from MongoDB: {e}")
+    return load_json(CONFIG_FILE)
+
+def save_config(config):
+    if mongo_db is not None:
+        try:
+            col = mongo_db["config"]
+            col.update_one({"_id": "settings"}, {"$set": {"data": config}}, upsert=True)
+            return
+        except Exception as e:
+            print(f"Error saving config to MongoDB: {e}")
+    save_json(CONFIG_FILE, config)
+
+# Initialize state from DBs
+db = load_db()
+users_db = load_users()
+config_db = load_config()
 
 # Ensure admin_id is set
 ADMIN_ID = os.getenv("ADMIN_ID")
@@ -53,7 +149,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK - Bot is running")
         
     def log_message(self, format, *args):
-        # Suppress logging request noise
         return
 
 def run_health_server():
@@ -61,16 +156,6 @@ def run_health_server():
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     print(f"Health check server running on port {port}...")
     server.serve_forever()
-
-def register_user(chat_id, username, first_name):
-    chat_id_str = str(chat_id)
-    if chat_id_str not in users_db:
-        users_db[chat_id_str] = {
-            "username": username or "",
-            "first_name": first_name or "",
-            "joined_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        save_json(USERS_FILE, users_db)
 
 def send_api(method, payload=None):
     url = API_URL + method
@@ -130,7 +215,7 @@ def handle_update(update):
         if not ADMIN_ID:
             ADMIN_ID = str(chat_id)
             config_db["admin_id"] = ADMIN_ID
-            save_json(CONFIG_FILE, config_db)
+            save_config(config_db)
             send_api("sendMessage", {
                 "chat_id": chat_id,
                 "text": "👑 Siz ushbu botning asosiy *Admini* etib tayinlandingiz!",
@@ -142,7 +227,7 @@ def handle_update(update):
         # Check for broadcast state
         if is_admin and config_db.get("state") == "waiting_for_broadcast":
             config_db["state"] = ""
-            save_json(CONFIG_FILE, config_db)
+            save_config(config_db)
             send_api("sendMessage", {"chat_id": chat_id, "text": "📢 Reklama tarqatilmoqda, kuting..."})
             
             success_count = 0
@@ -170,8 +255,7 @@ def handle_update(update):
                     cleaned = caption.replace("/set", "").strip()
                     episode_num = int(cleaned)
                     file_id = message["video"]["file_id"]
-                    db[str(episode_num)] = file_id
-                    save_json(DB_FILE, db)
+                    save_episode(episode_num, file_id)
                     send_api("sendMessage", {
                         "chat_id": chat_id,
                         "text": f"✅ {episode_num}-qism videosi muvaffaqiyatli saqlandi!"
@@ -192,8 +276,7 @@ def handle_update(update):
                     if "reply_to_message" in message and "video" in message["reply_to_message"]:
                         video_msg = message["reply_to_message"]
                         file_id = video_msg["video"]["file_id"]
-                        db[str(episode_num)] = file_id
-                        save_json(DB_FILE, db)
+                        save_episode(episode_num, file_id)
                         send_api("sendMessage", {
                             "chat_id": chat_id,
                             "text": f"✅ {episode_num}-qism videosi muvaffaqiyatli saqlandi! (Reply orqali)"
@@ -330,17 +413,17 @@ def handle_update(update):
                 })
             elif data == "admin_broadcast":
                 config_db["state"] = "waiting_for_broadcast"
-                save_json(CONFIG_FILE, config_db)
+                save_config(config_db)
                 send_api("editMessageText", {
                     "chat_id": chat_id,
                     "message_id": message_id,
-                    "text": "📢 *Reklama matnini (yoki rasmli/videoli reklama) yuboring:*\n\nMen uni barcha foydalanuvciamga jo'nataman.",
+                    "text": "📢 *Reklama matnini (yoki rasmli/videoli reklama) yuboring:*\n\nMen uni barcha foydalanuvchilarga jo'nataman.",
                     "parse_mode": "Markdown",
                     "reply_markup": {"inline_keyboard": [[{"text": "🚫 Bekor qilish", "callback_data": "admin_back"}]]}
                 })
             elif data == "admin_back":
                 config_db["state"] = ""
-                save_json(CONFIG_FILE, config_db)
+                save_config(config_db)
                 send_api("editMessageText", {
                     "chat_id": chat_id,
                     "message_id": message_id,
@@ -356,11 +439,11 @@ def main():
         print("Error: TELEGRAM_TOKEN not set in .env")
         return
 
-    # Start health server in background thread for Render compatibility
+    # Start health server for Render compatibility
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    print("Bot is starting via long polling with HTTP server active...")
+    print("Bot is starting via long polling with Cloud & Local DB support...")
     offset = 0
     while True:
         try:
