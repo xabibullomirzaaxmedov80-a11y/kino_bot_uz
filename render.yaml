@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: kino-bot-uz
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false # Admin will fill this in Render Dashboard
+      - key: BASE_URL
+        value: https://example.com/ichkarida
