@@ -1,4 +1,4 @@
 {
-  "summary":  "Database persistence upgrade using MongoDB Atlas with local JSON fallback for Kino Bot",
-  "updatedAt":  "2026-06-25T12:02:33.852178800Z"
+  "summary":  "Enable customizable database storage directory via DATA_DIR environment variable for Render Persistent Disk support",
+  "updatedAt":  "2026-06-25T12:03:44.739602800Z"
 }

@@ -13,9 +13,12 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/"
 
 TOTAL_EPISODES = 39
-DB_FILE = "episodes_db.json"
-USERS_FILE = "users_db.json"
-CONFIG_FILE = "config_db.json"
+
+# Path configuration for database files (Support Render Persistent Disk)
+DATA_DIR = os.getenv("DATA_DIR", ".")
+DB_FILE = os.path.join(DATA_DIR, "episodes_db.json")
+USERS_FILE = os.path.join(DATA_DIR, "users_db.json")
+CONFIG_FILE = os.path.join(DATA_DIR, "config_db.json")
 
 # Try importing pymongo for cloud database persistence
 try:
@@ -31,7 +34,6 @@ mongo_db = None
 
 if HAS_MONGO and MONGO_URL:
     try:
-        # Connect to MongoDB Atlas (or local MongoDB)
         mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
         mongo_db = mongo_client["kino_bot"]
         print("Connected to MongoDB successfully!")
@@ -50,6 +52,8 @@ def load_json(filename):
 
 def save_json(filename, data):
     try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -443,7 +447,7 @@ def main():
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    print("Bot is starting via long polling with Cloud & Local DB support...")
+    print("Bot is starting via long polling with Cloud & Disk DB support...")
     offset = 0
     while True:
         try:

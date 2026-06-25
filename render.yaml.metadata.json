@@ -1,4 +1,4 @@
 {
-  "summary":  "Update render.yaml blueprint to include MONGO_URL environment variable",
-  "updatedAt":  "2026-06-25T12:02:52.152595900Z"
+  "summary":  "Add Render Persistent Disk and DATA_DIR variable configuration to render.yaml",
+  "updatedAt":  "2026-06-25T12:03:47.383312100Z"
 }

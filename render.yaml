@@ -8,6 +8,12 @@ services:
       - key: TELEGRAM_TOKEN
         sync: false
       - key: MONGO_URL
-        sync: false # Optional: Enter MongoDB Atlas connection string here
+        sync: false # Optional: for free MongoDB cloud database
+      - key: DATA_DIR
+        value: /data # Path to the persistent disk mount point
       - key: BASE_URL
         value: https://example.com/ichkarida
+    disk:
+      name: kino-db-disk
+      mountPath: /data
+      sizeGB: 1
