@@ -7,5 +7,7 @@ services:
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
+      - key: MONGO_URL
+        sync: false # Optional: Enter MongoDB Atlas connection string here
       - key: BASE_URL
         value: https://example.com/ichkarida
