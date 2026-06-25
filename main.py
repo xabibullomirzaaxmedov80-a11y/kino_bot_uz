@@ -3,6 +3,8 @@ import json
 import urllib.request
 import urllib.parse
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -37,13 +39,30 @@ db = load_json(DB_FILE)
 users_db = load_json(USERS_FILE)
 config_db = load_json(CONFIG_FILE)
 
-# Ensure admin_id is set. If not, the first person to use /admin becomes admin (auto-setup)
+# Ensure admin_id is set
 ADMIN_ID = os.getenv("ADMIN_ID")
 if not ADMIN_ID and "admin_id" in config_db:
     ADMIN_ID = config_db["admin_id"]
 
+# --- Web Server for Render Free Tier Health Checks ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK - Bot is running")
+        
+    def log_message(self, format, *args):
+        # Suppress logging request noise
+        return
+
+def run_health_server():
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"Health check server running on port {port}...")
+    server.serve_forever()
+
 def register_user(chat_id, username, first_name):
-    """Add a new user to the database if they don't exist."""
     chat_id_str = str(chat_id)
     if chat_id_str not in users_db:
         users_db[chat_id_str] = {
@@ -54,7 +73,6 @@ def register_user(chat_id, username, first_name):
         save_json(USERS_FILE, users_db)
 
 def send_api(method, payload=None):
-    """Send request to Telegram Bot API."""
     url = API_URL + method
     headers = {"Content-Type": "application/json"}
     req = urllib.request.Request(url, headers=headers, method="POST")
@@ -125,13 +143,10 @@ def handle_update(update):
         if is_admin and config_db.get("state") == "waiting_for_broadcast":
             config_db["state"] = ""
             save_json(CONFIG_FILE, config_db)
-            
-            # Send broadcasting start notice
             send_api("sendMessage", {"chat_id": chat_id, "text": "📢 Reklama tarqatilmoqda, kuting..."})
             
             success_count = 0
             for u_id in users_db:
-                # We can copy the message to all users
                 res = send_api("copyMessage", {
                     "chat_id": int(u_id),
                     "from_chat_id": chat_id,
@@ -139,7 +154,7 @@ def handle_update(update):
                 })
                 if res and res.get("ok"):
                     success_count += 1
-                time.sleep(0.05) # anti-flood delay
+                time.sleep(0.05)
                 
             send_api("sendMessage", {
                 "chat_id": chat_id,
@@ -147,7 +162,7 @@ def handle_update(update):
             })
             return
 
-        # 1. Admin uploads a video with caption "/set <num>"
+        # Admin set video
         if is_admin and "video" in message and "caption" in message:
             caption = message["caption"].strip().lower()
             if caption.startswith("/set"):
@@ -166,7 +181,6 @@ def handle_update(update):
                     send_api("sendMessage", {"chat_id": chat_id, "text": f"❌ Xatolik: {e}"})
                     return
 
-        # 2. Admin replies to a video message with "/set <num>"
         if "text" in message:
             text = message["text"].strip().lower()
             
@@ -226,7 +240,7 @@ def handle_update(update):
                     "parse_mode": "Markdown"
                 })
 
-    # Handle Callback Queries
+    # Handle Callbacks
     elif "callback_query" in update:
         callback = update["callback_query"]
         callback_id = callback["id"]
@@ -239,6 +253,7 @@ def handle_update(update):
 
         if data.startswith("episode_"):
             episode_num = data.split("_")[1]
+            
             if episode_num in db:
                 file_id = db[episode_num]
                 send_api("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
@@ -319,7 +334,7 @@ def handle_update(update):
                 send_api("editMessageText", {
                     "chat_id": chat_id,
                     "message_id": message_id,
-                    "text": "📢 *Reklama matnini (yoki rasmli/videoli reklama) yuboring:*\n\nMen uni barcha foydalanuvchilarga jo'nataman.",
+                    "text": "📢 *Reklama matnini (yoki rasmli/videoli reklama) yuboring:*\n\nMen uni barcha foydalanuvciamga jo'nataman.",
                     "parse_mode": "Markdown",
                     "reply_markup": {"inline_keyboard": [[{"text": "🚫 Bekor qilish", "callback_data": "admin_back"}]]}
                 })
@@ -341,7 +356,11 @@ def main():
         print("Error: TELEGRAM_TOKEN not set in .env")
         return
 
-    print("Bot is starting via long polling with Admin Panel...")
+    # Start health server in background thread for Render compatibility
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+
+    print("Bot is starting via long polling with HTTP server active...")
     offset = 0
     while True:
         try:
